@@ -1,0 +1,7 @@
+gradio
+chromadb
+sentence-transformers
+groq
+PyPDF2
+python-docx
+torch
