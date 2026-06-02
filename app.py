@@ -5,6 +5,7 @@ import docx
 from sentence_transformers import SentenceTransformer
 import chromadb
 import torch
+import hashlib
 from groq import Groq
 
 # ── Setup ──────────────────────────────────────────────────────────────────────
@@ -55,11 +56,9 @@ def split_into_chunks(text: str, chunk_size: int = 400, overlap: int = 50) -> li
 # ── Ingestion Pipeline ─────────────────────────────────────────────────────────
 def get_or_create_collection(name: str = "policypal"):
     try:
-        chroma_client.delete_collection(name)
+        return chroma_client.get_collection(name)
     except:
-        pass
-    return chroma_client.create_collection(name)
-
+        return chroma_client.create_collection(name)  
 
 def ingest_document(file_path: str, collection_name: str = "policypal") -> dict:
     text = extract_text(file_path)
@@ -73,8 +72,10 @@ def ingest_document(file_path: str, collection_name: str = "policypal") -> dict:
     collection.add(
         documents=chunks,
         embeddings=embeddings.tolist(),
-        ids=[f"chunk_{i}" for i in range(len(chunks))],
-        metadatas=[{"source": file_path, "chunk_index": i} for i in range(len(chunks))]
+        ids=[f"{hashlib.md5(file_path.encode()).hexdigest()[:8]}_chunk_{i}"
+             for i in range(len(chunks))],
+        metadatas=[{"source": file_path, "chunk_index": i}
+                   for i in range(len(chunks))]
     )
 
     return {
@@ -84,10 +85,13 @@ def ingest_document(file_path: str, collection_name: str = "policypal") -> dict:
         "collection": collection_name
     }
 
-
 # ── RAG Query Pipeline ─────────────────────────────────────────────────────────
 def retrieve(query: str, collection_name: str = "policypal", top_k: int = 3) -> list:
-    collection = chroma_client.get_collection(collection_name)
+    try:
+        collection = chroma_client.get_collection(collection_name)
+    except:
+        return []
+
     query_embedding = embedder.encode([query]).tolist()
     results = collection.query(query_embeddings=query_embedding, n_results=top_k)
 
@@ -100,7 +104,7 @@ def retrieve(query: str, collection_name: str = "policypal", top_k: int = 3) -> 
             "chunk": chunk,
             "source": meta["source"],
             "chunk_index": meta["chunk_index"],
-            "relevance_score": round(1 - dist, 3)
+            "relevance_score": round(max(0, 1 - dist / 2), 3)
         }
         for chunk, meta, dist in zip(chunks, metadatas, distances)
     ]
@@ -129,22 +133,6 @@ Answer:"""
     return response.choices[0].message.content
 
 
-def rag_query(query: str, collection_name: str = "policypal") -> dict:
-    retrieved = retrieve(query, collection_name)
-    answer = generate_answer(query, retrieved)
-    return {
-        "query": query,
-        "answer": answer,
-        "sources": [
-            {
-                "chunk_preview": r["chunk"][:150] + "...",
-                "relevance_score": r["relevance_score"]
-            }
-            for r in retrieved
-        ]
-    }
-
-
 # ── Gradio UI ──────────────────────────────────────────────────────────────────
 def upload_and_ingest(file):
     if file is None:
@@ -152,24 +140,32 @@ def upload_and_ingest(file):
     result = ingest_document(file.name)
     if "error" in result:
         return f"❌ Error: {result['error']}"
-    return f"✅ Ingested successfully!\n📄 File: {result['file']}\n📦 Chunks: {result['chunks']}"
+    return (
+        f"✅ Ingested successfully!\n"
+        f"📄 File: {result['file']}\n"
+        f"📦 Chunks: {result['chunks']}\n"
+        f"🔤 Characters: {result['characters']}"
+    )
 
 
 def ask_question(question):
     if not question.strip():
-        return "Please enter a question", ""
+        return "Please enter a question.", ""
     try:
-        result = rag_query(question)
+        retrieved = retrieve(question)
+        if not retrieved:
+            return "⚠️ Please upload a document first.", ""
+        answer = generate_answer(question, retrieved)
+        sources_text = "\n\n".join([
+            f"📎 Source {i+1} (relevance: {r['relevance_score']}):\n{r['chunk'][:150]}..."
+            for i, r in enumerate(retrieved)
+        ])
+        return answer, sources_text
     except Exception as e:
         return f"❌ Error: {str(e)}", ""
-    sources_text = "\n\n".join([
-        f"📎 Source {i+1} (relevance: {s['relevance_score']}):\n{s['chunk_preview']}"
-        for i, s in enumerate(result["sources"])
-    ])
-    return result["answer"], sources_text
 
 
-with gr.Blocks(title="PolicyPal") as demo:
+with gr.Blocks(title="PolicyPal", theme=gr.themes.Soft()) as demo:
     gr.Markdown("# 📋 PolicyPal — HR Policy Assistant")
     gr.Markdown("Upload your HR policy documents and ask questions in plain English.")
 
@@ -188,6 +184,10 @@ with gr.Blocks(title="PolicyPal") as demo:
         ask_btn = gr.Button("Ask PolicyPal", variant="primary")
         answer_output = gr.Textbox(label="Answer", lines=5)
         sources_output = gr.Textbox(label="Sources Used", lines=6)
-        ask_btn.click(ask_question, inputs=question_input, outputs=[answer_output, sources_output])
+        ask_btn.click(
+            ask_question,
+            inputs=question_input,
+            outputs=[answer_output, sources_output]
+        )
 
-demo.launch(server_name="0.0.0.0", server_port=7860)
+demo.launch(share=True)
