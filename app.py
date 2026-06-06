@@ -134,18 +134,22 @@ Answer:"""
 
 
 # ── Gradio UI ──────────────────────────────────────────────────────────────────
-def upload_and_ingest(file):
-    if file is None:
-        return "❌ Please upload a file"
-    result = ingest_document(file.name)
-    if "error" in result:
-        return f"❌ Error: {result['error']}"
-    return (
-        f"✅ Ingested successfully!\n"
-        f"📄 File: {result['file']}\n"
-        f"📦 Chunks: {result['chunks']}\n"
-        f"🔤 Characters: {result['characters']}"
-    )
+def upload_and_ingest(files):
+    if not files:
+        return "❌ Please upload at least one file"
+    
+    results = []
+    for file in files:
+        result = ingest_document(file.name)
+        if "error" in result:
+            results.append(f"❌ {file.name}: {result['error']}")
+        else:
+            results.append(
+                f"✅ {result['file'].split('/')[-1]}\n"
+                f"   📦 Chunks: {result['chunks']} | 🔤 Characters: {result['characters']}"
+            )
+    
+    return "\n\n".join(results)
 
 
 def ask_question(question):
@@ -170,7 +174,10 @@ with gr.Blocks(title="PolicyPal", theme=gr.themes.Soft()) as demo:
     gr.Markdown("Upload your HR policy documents and ask questions in plain English.")
 
     with gr.Tab("📤 Upload Document"):
-        file_input = gr.File(label="Upload PDF, DOCX, or TXT")
+        file_input = gr.File(
+            label="Upload PDF, DOCX, or TXT files",
+            file_count="multiple"          # ← only change here
+        )
         upload_btn = gr.Button("Ingest Document", variant="primary")
         upload_output = gr.Textbox(label="Status", lines=4)
         upload_btn.click(upload_and_ingest, inputs=file_input, outputs=upload_output)
