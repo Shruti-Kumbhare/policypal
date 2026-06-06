@@ -13,11 +13,15 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"🖥️ Using device: {device}")
 
 print("Loading embedding model...")
-embedder = SentenceTransformer("all-MiniLM-L6-v2", device=device)
+# Upgraded bge-base-en-v1.5
+# Better semantic understanding, especially for domain-specific policy language
+embedder = SentenceTransformer("BAAI/bge-base-en-v1.5", device=device)
 print("✅ Embedding model loaded")
 
-chroma_client = chromadb.Client()
-print("✅ ChromaDB initialized")
+# PersistentClient instead of in-memory Client
+# Collection survives session restarts — no need to re-upload documents every time
+chroma_client = chromadb.PersistentClient(path="./chroma_db")
+print("✅ ChromaDB initialized (persistent)")
 
 groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
 print("✅ Groq client ready")
@@ -58,56 +62,75 @@ def get_or_create_collection(name: str = "policypal"):
     try:
         return chroma_client.get_collection(name)
     except:
-        return chroma_client.create_collection(name)  
-
+        return chroma_client.create_collection(name)
+    
 def ingest_document(file_path: str, collection_name: str = "policypal") -> dict:
     text = extract_text(file_path)
     if not text:
         return {"error": "Could not extract text from document"}
 
     chunks = split_into_chunks(text)
-    embeddings = embedder.encode(chunks, show_progress_bar=False)
+    
+    # BGE models perform better with a query prefix during encoding
+    prefixed_chunks = [f"passage: {c}" for c in chunks]
+    embeddings = embedder.encode(prefixed_chunks, show_progress_bar=False)
 
     collection = get_or_create_collection(collection_name)
+    
+    file_hash = hashlib.md5(file_path.encode()).hexdigest()[:8]
+    ids = [f"{file_hash}_chunk_{i}" for i in range(len(chunks))]
+    
+    # Skip already-ingested chunks (duplicate guard)
+    existing = collection.get(ids=ids)["ids"]
+    new_indices = [i for i, id_ in enumerate(ids) if id_ not in existing]
+    
+    if not new_indices:
+        return {"file": file_path, "characters": len(text), "chunks": 0, "skipped": True}
+    
     collection.add(
-        documents=chunks,
-        embeddings=embeddings.tolist(),
-        ids=[f"{hashlib.md5(file_path.encode()).hexdigest()[:8]}_chunk_{i}"
-             for i in range(len(chunks))],
-        metadatas=[{"source": file_path, "chunk_index": i}
-                   for i in range(len(chunks))]
+        documents=[chunks[i] for i in new_indices],
+        embeddings=[embeddings[i].tolist() for i in new_indices],
+        ids=[ids[i] for i in new_indices],
+        metadatas=[{"source": file_path, "chunk_index": i} for i in new_indices]
     )
 
     return {
         "file": file_path,
         "characters": len(text),
-        "chunks": len(chunks),
+        "chunks": len(new_indices),
         "collection": collection_name
     }
 
 # ── RAG Query Pipeline ─────────────────────────────────────────────────────────
-def retrieve(query: str, collection_name: str = "policypal", top_k: int = 3) -> list:
+def retrieve(query: str, collection_name: str = "policypal", top_k: int = 5) -> list:
+    #  top_k 5, plus relevance threshold filter
     try:
         collection = chroma_client.get_collection(collection_name)
     except:
         return []
 
-    query_embedding = embedder.encode([query]).tolist()
+    # BGE query prefix for retrieval
+    prefixed_query = f"query: {query}"
+    query_embedding = embedder.encode([prefixed_query]).tolist()
     results = collection.query(query_embeddings=query_embedding, n_results=top_k)
 
     chunks = results["documents"][0]
     metadatas = results["metadatas"][0]
     distances = results["distances"][0]
 
-    return [
-        {
-            "chunk": chunk,
-            "source": meta["source"],
-            "chunk_index": meta["chunk_index"],
-            "relevance_score": round(max(0, 1 - dist / 2), 3)
-        }
-        for chunk, meta, dist in zip(chunks, metadatas, distances)
-    ]
+    retrieved = []
+    for chunk, meta, dist in zip(chunks, metadatas, distances):
+        score = round(max(0, 1 - dist / 2), 3)
+        # ✅ Filter out low-relevance chunks (score < 0.4 = noise)
+        if score >= 0.4:
+            retrieved.append({
+                "chunk": chunk,
+                "source": meta["source"],
+                "chunk_index": meta["chunk_index"],
+                "relevance_score": score
+            })
+
+    return retrieved
 
 
 def generate_answer(query: str, retrieved_chunks: list) -> str:
@@ -134,21 +157,24 @@ Answer:"""
 
 
 # ── Gradio UI ──────────────────────────────────────────────────────────────────
+# Multi-file upload — loops over all files, reports per-file status
 def upload_and_ingest(files):
     if not files:
         return "❌ Please upload at least one file"
-    
+
     results = []
     for file in files:
         result = ingest_document(file.name)
         if "error" in result:
-            results.append(f"❌ {file.name}: {result['error']}")
+            results.append(f"❌ {file.name.split('/')[-1]}: {result['error']}")
+        elif result.get("skipped"):
+            results.append(f"⚠️ {result['file'].split('/')[-1]} — already ingested, skipped")
         else:
             results.append(
                 f"✅ {result['file'].split('/')[-1]}\n"
                 f"   📦 Chunks: {result['chunks']} | 🔤 Characters: {result['characters']}"
             )
-    
+
     return "\n\n".join(results)
 
 
@@ -158,10 +184,10 @@ def ask_question(question):
     try:
         retrieved = retrieve(question)
         if not retrieved:
-            return "⚠️ Please upload a document first.", ""
+            return "⚠️ No relevant content found. Try rephrasing, or upload a document first.", ""
         answer = generate_answer(question, retrieved)
         sources_text = "\n\n".join([
-            f"📎 Source {i+1} (relevance: {r['relevance_score']}):\n{r['chunk'][:150]}..."
+            f"📎 Source {i+1} (relevance: {r['relevance_score']}) — {r['source'].split('/')[-1]}:\n{r['chunk'][:150]}..."
             for i, r in enumerate(retrieved)
         ])
         return answer, sources_text
@@ -176,10 +202,10 @@ with gr.Blocks(title="PolicyPal", theme=gr.themes.Soft()) as demo:
     with gr.Tab("📤 Upload Document"):
         file_input = gr.File(
             label="Upload PDF, DOCX, or TXT files",
-            file_count="multiple"          # ← only change here
+            file_count="multiple"       # multi-file
         )
-        upload_btn = gr.Button("Ingest Document", variant="primary")
-        upload_output = gr.Textbox(label="Status", lines=4)
+        upload_btn = gr.Button("Ingest Documents", variant="primary")
+        upload_output = gr.Textbox(label="Status", lines=6)
         upload_btn.click(upload_and_ingest, inputs=file_input, outputs=upload_output)
 
     with gr.Tab("💬 Ask Questions"):
