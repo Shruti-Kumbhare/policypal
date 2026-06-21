@@ -5,7 +5,6 @@ import gradio as gr
 # In HuggingFace Spaces, FastAPI runs on port 7861 alongside Gradio on 7860
 API_BASE = os.environ.get("API_BASE_URL", "http://localhost:7861")
 
-
 # ── Handlers ───────────────────────────────────────────────────────────────────
 
 def upload_and_ingest(files):
