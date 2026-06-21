@@ -1,7 +1,9 @@
+import os
+import requests
 import gradio as gr
-from retrieval.store import ingest_document
-from retrieval.retriever import retrieve
-from generation.generator import generate_answer
+
+# In HuggingFace Spaces, FastAPI runs on port 7861 alongside Gradio on 7860
+API_BASE = os.environ.get("API_BASE_URL", "http://localhost:7861")
 
 
 # ── Handlers ───────────────────────────────────────────────────────────────────
@@ -10,26 +12,29 @@ def upload_and_ingest(files):
     if not files:
         return "❌ Please upload at least one file."
 
-    results = []
-    for file in files:
-        result = ingest_document(file.name)
+    file_tuples = [("files", (f.name.split("/")[-1], open(f.name, "rb"))) for f in files]
 
-        if "error" in result:
-            results.append(f"❌ {file.name.split('/')[-1]}: {result['error']}")
+    try:
+        resp = requests.post(f"{API_BASE}/ingest/", files=file_tuples, timeout=120)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        return f"❌ API error: {e}"
 
-        elif result.get("already_ingested"):
-            results.append(f"⚠️  {file.name.split('/')[-1]} — already ingested, skipped.")
-
+    lines = []
+    for r in data["results"]:
+        if "error" in r:
+            lines.append(f"❌ {r['file']}: {r['error']}")
+        elif r.get("already_ingested"):
+            lines.append(f"⚠️  {r['file']} — already ingested, skipped")
         else:
-            sections_preview = ", ".join(result["sections_detected"]) or "none detected"
-            results.append(
-                f"✅ {file.name.split('/')[-1]}\n"
-                f"   📦 Chunks added : {result['chunks_added']}\n"
-                f"   🔤 Characters   : {result['characters']}\n"
-                f"   📑 Sections     : {sections_preview}"
+            sections = ", ".join(r.get("sections_detected", [])) or "none detected"
+            lines.append(
+                f"✅ {r['file']}\n"
+                f"   📦 Chunks: {r['chunks_added']} | 🔤 Chars: {r['characters']}\n"
+                f"   📑 Sections: {sections}"
             )
-
-    return "\n\n".join(results)
+    return "\n\n".join(lines)
 
 
 def ask_question(question):
@@ -37,42 +42,45 @@ def ask_question(question):
         return "Please enter a question.", ""
 
     try:
-        retrieved = retrieve(question)
-
-        if not retrieved:
-            return (
-                "⚠️ No relevant content found above the confidence threshold.\n"
-                "Try rephrasing your question, or check that the right documents are uploaded.",
-                "",
-            )
-
-        answer = generate_answer(question, retrieved)
-
-        sources_text = "\n\n".join([
-            f"📎 [{r['relevance_score']}] {r['source_name']} — {r['section']}\n"
-            f"{r['chunk'][:180]}..."
-            for r in retrieved
-        ])
-
-        return answer, sources_text
-
+        resp = requests.post(
+            f"{API_BASE}/query/",
+            json={"question": question},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        data = resp.json()
     except Exception as e:
-        return f"❌ Error: {str(e)}", ""
+        return f"❌ API error: {e}", ""
+
+    sources_text = "\n\n".join([
+        f"📎 [{s['relevance_score']}] {s['source_name']} — {s['section']}\n{s['excerpt']}..."
+        for s in data["sources"]
+    ])
+
+    return data["answer"], sources_text
+
+
+def list_docs():
+    try:
+        resp = requests.get(f"{API_BASE}/documents/", timeout=10)
+        data = resp.json()
+        if not data["documents"]:
+            return "No documents ingested yet."
+        return "\n".join([f"📄 {d}" for d in data["documents"]])
+    except Exception as e:
+        return f"❌ {e}"
 
 
 # ── UI ─────────────────────────────────────────────────────────────────────────
 
-with gr.Blocks(title="PolicyPal", theme=gr.themes.Soft()) as demo:
+with gr.Blocks(title="PolicyPal") as demo:
     gr.Markdown("# 📋 PolicyPal — HR Policy Assistant")
     gr.Markdown("Upload HR policy documents and ask questions in plain English.")
 
     with gr.Tab("📤 Upload Documents"):
-        file_input = gr.File(
-            label="Upload PDF, DOCX, or TXT files",
-            file_count="multiple",
-        )
+        file_input = gr.File(label="Upload PDF, DOCX, or TXT", file_count="multiple")
         upload_btn = gr.Button("Ingest Documents", variant="primary")
-        upload_output = gr.Textbox(label="Ingestion Status", lines=8)
+        upload_output = gr.Textbox(label="Status", lines=8)
         upload_btn.click(upload_and_ingest, inputs=file_input, outputs=upload_output)
 
     with gr.Tab("💬 Ask Questions"):
@@ -82,12 +90,13 @@ with gr.Blocks(title="PolicyPal", theme=gr.themes.Soft()) as demo:
             lines=2,
         )
         ask_btn = gr.Button("Ask PolicyPal", variant="primary")
-        answer_output = gr.Textbox(label="Answer", lines=6)
+        answer_output  = gr.Textbox(label="Answer", lines=6)
         sources_output = gr.Textbox(label="Sources Used", lines=8)
-        ask_btn.click(
-            ask_question,
-            inputs=question_input,
-            outputs=[answer_output, sources_output],
-        )
+        ask_btn.click(ask_question, inputs=question_input, outputs=[answer_output, sources_output])
 
-demo.launch(share=True)
+    with gr.Tab("📂 Loaded Documents"):
+        refresh_btn = gr.Button("Refresh", variant="secondary")
+        docs_output = gr.Textbox(label="Ingested documents", lines=10)
+        refresh_btn.click(list_docs, inputs=[], outputs=docs_output)
+
+demo.launch(server_port=7860, theme=gr.themes.Soft())
