@@ -97,5 +97,16 @@ with gr.Blocks(title="PolicyPal") as demo:
         refresh_btn = gr.Button("Refresh", variant="secondary")
         docs_output = gr.Textbox(label="Ingested documents", lines=10)
         refresh_btn.click(list_docs, inputs=[], outputs=docs_output)
+import time
+
+# ── Debug: verify FastAPI backend is actually reachable ────────────────────────
+time.sleep(5)
+try:
+    r = requests.get(f"{API_BASE}/health", timeout=10)
+    print(f"🔍 Health check status: {r.status_code}")
+    print(f"🔍 Health check body: {r.text}")
+except Exception as e:
+    print(f"🔍 Health check failed: {e}")
+# ─────────────────────────────────────────────────────────────────────────────
 
 demo.launch(server_port=7860, theme=gr.themes.Soft())
