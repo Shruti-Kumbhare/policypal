@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import ingest, query, documents
+from api.routes import ingest, query, document
 
 app = FastAPI(
     title="PolicyPal API",
@@ -17,7 +17,7 @@ app.add_middleware(
 
 app.include_router(ingest.router,    prefix="/ingest",    tags=["Ingestion"])
 app.include_router(query.router,     prefix="/query",     tags=["Query"])
-app.include_router(documents.router, prefix="/documents", tags=["Documents"])
+app.include_router(document.router, prefix="/document", tags=["Document"])
 
 
 @app.get("/health")
