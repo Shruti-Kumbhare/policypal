@@ -3,12 +3,6 @@
 # Start FastAPI on port 7861 in background
 uvicorn api.main:app --host 0.0.0.0 --port 7861 > /tmp/fastapi.log 2>&1 &
 
-# Store the PID so we can wait for it
-FASTAPI_PID=$!
-
-# Wait for it to either start or crash
-sleep 45
-
 echo "===== FastAPI startup log ====="
 cat /tmp/fastapi.log
 echo "================================"
@@ -22,3 +16,8 @@ fi
 
 # Start Gradio
 python app.py
+2d966796-e701-4b2e-97f3-754f133c0a36
+
+
+ck-BEPRSimdXk4ndjEYmh1cKhNYhgVjwVkSsnfra7PhK98B
+chroma login --api-key ck-BEPRSimdXk4ndjEYmh1cKhNYhgVjwVkSsnfra7PhK98B
