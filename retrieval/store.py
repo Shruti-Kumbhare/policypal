@@ -39,22 +39,24 @@ def list_documents(collection_name: str = COLLECTION_NAME) -> list[str]:
     except Exception:
         return []
 
-
-def ingest_document(file_path: str, collection_name: str = COLLECTION_NAME) -> dict:
+def ingest_document(file_path: str, collection_name: str = COLLECTION_NAME, original_filename: str = None) -> dict:
     text = extract_text(file_path)
     if not text:
         return {"error": "Could not extract text from document"}
 
+    # Use original filename if provided, else fall back to temp path
+    display_name = original_filename or file_path.split("/")[-1]
+
     chunks    = chunk_text(text)
-    file_hash = hashlib.md5(file_path.encode()).hexdigest()[:8]
+    file_hash = hashlib.md5(display_name.encode()).hexdigest()[:8]  # hash on real name
 
     ids       = [f"{file_hash}_sec{c['section_index']}_chunk{i}" for i, c in enumerate(chunks)]
     texts     = [c["text"] for c in chunks]
     metadatas = [
         {
-            "source":       file_path,
-            "source_name":  file_path.split("/")[-1],
-            "section":      c["section"],
+            "source":        display_name,   # ← real filename
+            "source_name":   display_name,   # ← real filename
+            "section":       c["section"],
             "section_index": c["section_index"],
         }
         for c in chunks

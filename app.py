@@ -6,19 +6,21 @@ import gradio as gr
 API_BASE = os.environ.get("API_BASE_URL", "http://localhost:7861")
 
 # ── Handlers ───────────────────────────────────────────────────────────────────
-
 def upload_and_ingest(files):
     if not files:
         return "❌ Please upload at least one file."
 
+    print(f"File type: {type(files)}")
+    print(f"File object: {files}")
     file_tuples = [("files", (f.name.split("/")[-1], open(f.name, "rb"))) for f in files]
-
     try:
         resp = requests.post(f"{API_BASE}/ingest/", files=file_tuples, timeout=120)
-        resp.raise_for_status()
+        # Show full response for debugging
+        if not resp.ok:
+            return f"❌ HTTP {resp.status_code}: {resp.text}"
         data = resp.json()
     except Exception as e:
-        return f"❌ API error: {e}"
+        return f"❌ API error: {type(e).__name__}: {e}"
 
     lines = []
     for r in data["results"]:
@@ -34,7 +36,6 @@ def upload_and_ingest(files):
                 f"   📑 Sections: {sections}"
             )
     return "\n\n".join(lines)
-
 
 def ask_question(question):
     if not question.strip():

@@ -25,12 +25,13 @@ async def ingest_files(files: List[UploadFile] = File(...)):
             tmp_path = tmp.name
 
         try:
-            result = ingest_document(tmp_path)
-            result["file"] = file.filename      # return original name not tmp path
+            result = ingest_document(
+                tmp_path,
+                original_filename=file.filename   # ← pass real name here
+            )
+            result["file"] = file.filename
             results.append(result)
         except Exception as e:
             results.append({"file": file.filename, "error": str(e)})
         finally:
             os.unlink(tmp_path)
-
-    return {"results": results}
