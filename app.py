@@ -15,10 +15,19 @@ def upload_and_ingest(files):
     file_tuples = [("files", (f.name.split("/")[-1], open(f.name, "rb"))) for f in files]
     try:
         resp = requests.post(f"{API_BASE}/ingest/", files=file_tuples, timeout=120)
-        # Show full response for debugging
         if not resp.ok:
             return f"❌ HTTP {resp.status_code}: {resp.text}"
+        
+        # Guard against empty response
+        if not resp.text:
+            return f"❌ Empty response from API"
+        
         data = resp.json()
+        print(f"🔍 API response: {data}")
+        
+        if data is None:
+            return f"❌ API returned null response"
+            
     except Exception as e:
         return f"❌ API error: {type(e).__name__}: {e}"
 
