@@ -109,4 +109,4 @@ except Exception as e:
     print(f"🔍 Health check failed: {e}")
 # ─────────────────────────────────────────────────────────────────────────────
 
-demo.launch(server_port=7860, theme=gr.themes.Soft())
+demo.launch(server_name="0.0.0.0", server_port=7860, ssr_mode=False, theme=gr.themes.Soft())
