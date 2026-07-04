@@ -27,7 +27,7 @@ async def ingest_files(files: List[UploadFile] = File(...)):
         try:
             result = ingest_document(
                 tmp_path,
-                original_filename=file.filename   # ← pass real name here
+                original_filename=file.filename
             )
             result["file"] = file.filename
             results.append(result)
@@ -35,3 +35,5 @@ async def ingest_files(files: List[UploadFile] = File(...)):
             results.append({"file": file.filename, "error": str(e)})
         finally:
             os.unlink(tmp_path)
+
+    return {"results": results}  # ← this was missing
