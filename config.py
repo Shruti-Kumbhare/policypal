@@ -19,6 +19,6 @@ RELEVANCE_THRESHOLD  = 0.4
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
 GROQ_API_KEY  = os.environ.get("GROQ_API_KEY", "")
-GROQ_MODEL    = "llama-3.1-8b-instant"
-MAX_TOKENS    = 500
+GROQ_MODEL    = "openai/gpt-oss-20b"
+MAX_TOKENS    = 1500
 TEMPERATURE   = 0.1
