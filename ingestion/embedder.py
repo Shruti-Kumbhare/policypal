@@ -4,11 +4,9 @@ from config import EMBEDDING_MODEL
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"🖥️  Using device: {device}")
 
-print(f"Loading embedding model: {EMBEDDING_MODEL} ...")
 _embedder = SentenceTransformer(EMBEDDING_MODEL, device=device)
-print("✅ Embedding model loaded")
+
 
 
 def encode_passages(texts: list[str]) -> list[list[float]]:

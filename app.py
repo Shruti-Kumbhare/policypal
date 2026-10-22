@@ -10,8 +10,6 @@ def upload_and_ingest(files):
     if not files:
         return "❌ Please upload at least one file."
 
-    print(f"File type: {type(files)}")
-    print(f"File object: {files}")
     file_tuples = [("files", (f.name.split("/")[-1], open(f.name, "rb"))) for f in files]
     try:
         resp = requests.post(f"{API_BASE}/ingest/", files=file_tuples, timeout=120)
@@ -23,7 +21,7 @@ def upload_and_ingest(files):
             return f"❌ Empty response from API"
         
         data = resp.json()
-        print(f"🔍 API response: {data}")
+
         
         if data is None:
             return f"❌ API returned null response"
@@ -113,10 +111,9 @@ import time
 time.sleep(5)
 try:
     r = requests.get(f"{API_BASE}/health", timeout=10)
-    print(f"🔍 Health check status: {r.status_code}")
-    print(f"🔍 Health check body: {r.text}")
+
 except Exception as e:
-    print(f"🔍 Health check failed: {e}")
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 demo.launch(server_name="0.0.0.0", server_port=7860, ssr_mode=False, theme=gr.themes.Soft())

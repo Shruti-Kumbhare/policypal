@@ -3,7 +3,6 @@ from config import GROQ_API_KEY, GROQ_MODEL, MAX_TOKENS, TEMPERATURE
 
 
 _client = Groq(api_key=GROQ_API_KEY)
-print("✅ Groq client ready")
 
 
 SYSTEM_PROMPT = """You are PolicyPal, a precise and helpful HR policy assistant.
